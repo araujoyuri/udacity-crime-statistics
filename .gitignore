@@ -5,3 +5,9 @@ venv
 ### IDEs ###
 .vscode
 .idea
+
+### Data ###
+police-department-calls-for-service.json
+
+### Jupyer ###
+.ipynb_checkpoints
