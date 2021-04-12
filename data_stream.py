@@ -52,16 +52,24 @@ def run_spark_job(spark):
         .select("DF.*")
 
     # TODO select original_crime_type_name and disposition
-    distinct_table = service_table.select('original_crime_type_name', 'disposition')
+    distinct_table = service_table \
+        .withWatermark("call_date_time", "60 minutes") \
+        .select(["call_date_time", "original_crime_type_name", "disposition"])
 
     # count the number of original crime type
-    agg_df = distinct_table.select('*').count()
+    agg_df = distinct_table.groupby(
+        psf.window("call_date_time", "60 minutes"),
+        psf.col("original_crime_type_name")
+    ) \
+        .count() \
+        .orderBy("count", ascending=False)
 
     # TODO Q1. Submit a screen shot of a batch ingestion of the aggregation
     # TODO write output stream
     query = agg_df.writeStream \
-        .outputMode('complete') \
-        .format('console') \
+        .outputMode("complete") \
+        .format("console") \
+        .trigger(processingTime='1 minute') \
         .start()
     # source: https://spark.apache.org/docs/latest/structured-streaming-programming-guide.html#quick-example
 
@@ -79,12 +87,13 @@ def run_spark_job(spark):
     radio_code_df = radio_code_df.withColumnRenamed("disposition_code", "disposition")
 
     # TODO join on disposition column
-    join_query = agg_df \
-        .join(radio_code_df, on='disposition') \
-        .select('original_crime_type_name', 'disposition') \
+    join_query = distinct_table \
+        .join(radio_code_df, on="disposition") \
+        .select(["original_crime_type_name", "disposition"]) \
         .writeStream \
-        .outputMode('complete') \
-        .format('console') \
+        .outputMode("append") \
+        .format("console") \
+        .trigger(processingTime='1 minute') \
         .start()
 
     join_query.awaitTermination()
@@ -97,8 +106,13 @@ if __name__ == "__main__":
     spark = SparkSession \
         .builder \
         .master("local[*]") \
+        .config('spark.ui.port', 3000) \
+        .config("spark.sql.shuffle.partitions", "10") \
+        .config("spark.default.parallelism", "80") \
         .appName("KafkaSparkStructuredStreaming") \
         .getOrCreate()
+
+    # source: https://stackoverflow.com/questions/45704156/what-is-the-difference-between-spark-sql-shuffle-partitions-and-spark-default-pa
 
     logger.info("Spark started")
 
